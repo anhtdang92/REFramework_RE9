@@ -1,4 +1,24 @@
-# REFramework [![Build status](https://github.com/praydog/reframework/actions/workflows/dev-release.yml/badge.svg)](https://github.com/praydog/REFramework-nightly/releases)
+# REFramework (RE9 Fork) [![Build status](https://github.com/praydog/reframework/actions/workflows/dev-release.yml/badge.svg)](https://github.com/praydog/REFramework-nightly/releases)
+
+A fork of [praydog/REFramework](https://github.com/praydog/REFramework) focused on **Resident Evil 9: Requiem** modding and fixes.
+
+## RE9-Specific Additions
+
+### Film Grain Disabler
+RE9 ships with a forced film grain / noise post-processing filter that cannot be toggled from the in-game graphics menu or `config.ini`. This fork includes a Lua script (`scripts/re9/re9_disable_postprocessing.lua`) and bundles a [Nexus Mods community script](https://www.nexusmods.com/residentevilrequiem) that disables it at runtime via REFramework.
+
+**How it works:** The script accesses `app.RenderingManager` and calls `set__IsFilmGrainCustomFilterEnable(false)` every frame to force the custom film grain filter off.
+
+### Installation (RE9)
+1. Build the RE9 target or download `dinput8.dll` from Releases
+2. Copy `dinput8.dll` into your RE9 game folder (next to `re9.exe`)
+3. Copy the `reframework/autorun/disable_film_grain.lua` script into `<game folder>/reframework/autorun/`
+4. Launch the game — press **Insert** to open the REFramework overlay
+
+---
+
+## Original REFramework
+
 A mod framework, scripting platform, and modding tool for RE Engine games. Inspired by and uses code from [Kanan](https://github.com/cursey/kanan-new)
 
 ## Installation
@@ -46,6 +66,7 @@ Supports both DirectX 11 and DirectX 12.
 * Object Explorer
 
 ## Supported Games
+* **Resident Evil 9: Requiem** (primary target of this fork)
 * Resident Evil 2
 * Resident Evil 3
 * Resident Evil 4
