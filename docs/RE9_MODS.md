@@ -41,7 +41,9 @@ No configuration needed — it runs automatically. Shows a status readout in the
 
 ---
 
-## 3. Post Processing Control (`re9_disable_postprocessing.lua`)
+## 3. Post Processing Control (`re9_disable_postprocessing.lua`) — ⚠️ EXPERIMENTAL
+
+> **Not deployed.** This script is kept in `scripts/re9/` for testing only. The RE Engine ignores most runtime changes to graphics pipeline settings (fog, god rays, lens flare, lens distortion) via the `GraphicsManager` API — they only take effect at startup. Only camera component settings (TAA, color correction, local exposure, contrast) and the film grain `RenderingManager` call work at runtime. See [MHWilds_DisablePostProcessingEffects](https://github.com/TonWonton/MHWilds_DisablePostProcessingEffects) for the same known limitation.
 
 A comprehensive script with a full ImGui settings panel. Controls the following effects:
 

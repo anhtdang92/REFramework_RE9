@@ -4,17 +4,17 @@ local mod = {
 }
 
 local settings = {
-    filmGrain = false,
-    lensDistortion = false,
-    lensFlare = false,
-    bloom = false,
-    volumetricFog = false,
-    fog = false,
-    godRay = false,
-    colorCorrect = false,
-    TAA = false,
-    jitter = false,
-    localExposure = false,
+    filmGrain = true,
+    lensDistortion = true,
+    lensFlare = true,
+    bloom = true,
+    volumetricFog = true,
+    fog = true,
+    godRay = true,
+    colorCorrect = true,
+    TAA = true,
+    jitter = true,
+    localExposure = true,
     customContrast = false,
     contrast = 1.0,
 }
@@ -67,7 +67,19 @@ local function LoadSettings()
 end
 
 local function ApplySettings()
-    if not initialized then return end
+    -- Re-acquire managers every frame in case of scene changes
+    graphicsManager = sdk.get_managed_singleton("app.GraphicsManager")
+    if not graphicsManager then return end
+
+    cameraManager = sdk.get_managed_singleton("app.CameraManager")
+
+    -- Film grain: use app.RenderingManager (the only approach that works at runtime in RE9)
+    local renderingManager = sdk.get_managed_singleton("app.RenderingManager")
+    if renderingManager then
+        renderingManager:call("set__IsFilmGrainCustomFilterEnable", settings.filmGrain)
+    end
+
+    graphicsSetting = graphicsManager:call("get_NowGraphicsSetting")
 
     if graphicsSetting then
         graphicsSetting:call("set_FilmGrain_Enable", settings.filmGrain)
@@ -77,16 +89,42 @@ local function ApplySettings()
         graphicsSetting:call("set_GodRay_Enable", settings.godRay)
 
         pcall(function()
-            graphicsSetting:call("set_LensDistortionSetting",
-                settings.lensDistortion and lensDistortionSetting.ON or lensDistortionSetting.OFF)
+            if not lensDistortionSetting then
+                lensDistortionSetting = GenerateEnum("via.render.RenderConfig.LensDistortionSetting", true)
+            end
+            if lensDistortionSetting then
+                graphicsSetting:call("set_LensDistortionSetting",
+                    settings.lensDistortion and lensDistortionSetting.ON or lensDistortionSetting.OFF)
+            end
         end)
 
         graphicsManager:call("setGraphicsSetting", graphicsSetting)
     end
 
+    -- Re-acquire camera components every frame
+    if cameraManager then
+        local camera = cameraManager:call("get_PrimaryCamera")
+        if camera then
+            local cameraGO = camera:call("get_GameObject")
+            if cameraGO then
+                tonemapping = get_component(cameraGO, "via.render.ToneMapping")
+
+                local ldrPost = get_component(cameraGO, "via.render.LDRPostProcess")
+                if ldrPost then
+                    colorCorrectComponent = ldrPost:call("get_ColorCorrect")
+                end
+            end
+        end
+    end
+
     if tonemapping then
-        tonemapping:call("setTemporalAA",
-            settings.TAA and TAAStrength.Manual or TAAStrength.Disable)
+        if not TAAStrength then
+            TAAStrength = GenerateEnum("via.render.ToneMapping.TemporalAA", true)
+        end
+        if TAAStrength then
+            tonemapping:call("setTemporalAA",
+                settings.TAA and TAAStrength.Manual or TAAStrength.Disable)
+        end
         tonemapping:call("set_EchoEnabled", settings.jitter)
         tonemapping:call("set_EnableLocalExposure", settings.localExposure)
 
@@ -98,73 +136,16 @@ local function ApplySettings()
     if colorCorrectComponent then
         colorCorrectComponent:call("set_Enabled", settings.colorCorrect)
     end
-end
 
-local function Initialize()
-    graphicsManager = sdk.get_managed_singleton("app.GraphicsManager")
-    if not graphicsManager then return end
-
-    cameraManager = sdk.get_managed_singleton("app.CameraManager")
-    if not cameraManager then return end
-
-    graphicsSetting = graphicsManager:call("get_NowGraphicsSetting")
-    if not graphicsSetting then return end
-
-    displaySettings = graphicsManager:call("get_DisplaySettings")
-
-    TAAStrength = GenerateEnum("via.render.ToneMapping.TemporalAA", true)
-    localExposureType = GenerateEnum("via.render.ToneMapping.LocalExposureType", true)
-    lensDistortionSetting = GenerateEnum("via.render.RenderConfig.LensDistortionSetting", true)
-
-    local camera = cameraManager:call("get_PrimaryCamera")
-    if camera then
-        local cameraGO = camera:call("get_GameObject")
-        if cameraGO then
-            tonemapping = get_component(cameraGO, "via.render.ToneMapping")
-            tonemappingType = sdk.find_type_definition("via.render.ToneMapping")
-
-            local ldrPost = get_component(cameraGO, "via.render.LDRPostProcess")
-            if ldrPost then
-                colorCorrectComponent = ldrPost:call("get_ColorCorrect")
-            end
-        end
+    if not initialized then
+        initialized = true
+        log.info("[RE9 PostProcess] Initialized successfully")
     end
-
-    local cmType = sdk.find_type_definition("app.CameraManager")
-    if cmType then
-        local sceneMethod = cmType:get_method("onSceneLoadFadeIn")
-        if sceneMethod then
-            sdk.hook(sceneMethod, function() end, function() ApplySettings() end)
-        end
-    end
-
-    if tonemappingType then
-        local clearMethod = tonemappingType:get_method("clearHistogram")
-        if clearMethod then
-            sdk.hook(clearMethod, function() end, function()
-                if tonemapping then
-                    tonemapping:call("set_EnableLocalExposure", settings.localExposure)
-                end
-            end)
-        end
-    end
-
-    if colorCorrectComponent then
-        re.on_application_entry("LockScene", function()
-            if colorCorrectComponent then
-                colorCorrectComponent:call("set_Enabled", settings.colorCorrect)
-            end
-        end)
-    end
-
-    initialized = true
-    ApplySettings()
-    log.info("[RE9 PostProcess] Initialized successfully")
 end
 
 LoadSettings()
 re.on_frame(function()
-    if not initialized then Initialize() end
+    ApplySettings()
 end)
 re.on_config_save(SaveSettings)
 
