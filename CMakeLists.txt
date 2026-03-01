@@ -49,10 +49,10 @@ project(reframework
 	LANGUAGES
 		CXX
 		C
-		CSharp
+		# CSharp disabled for Ninja build
 )
 
-include(CSharpUtilities)
+# include(CSharpUtilities)
 
 set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP")
