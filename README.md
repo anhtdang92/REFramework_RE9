@@ -37,7 +37,7 @@ You can disable them individually — e.g. only rename `dxgi.dll` to keep REFram
 
 ### RenoDX Performance Warning
 
-**RenoDX (ReShade HDR addon) causes severe stutter** — periodic FPS drops below 10 fps every ~10 seconds. Disabling Frame Generation does not fix it. **Recommended setup: REFramework only.** Keep `dxgi.dll` disabled (or renamed to `dxgi.dll.disabled`) and use REFramework for the film grain fix, FOV, etc. Skip RenoDX until compatibility improves.
+**RenoDX (ReShade HDR addon) causes severe stutter** — periodic FPS drops below 10 fps every ~10 seconds. Disabling Frame Generation does not fix it. ReShade itself does not cause stutter; only the RenoDX addon is responsible. You can keep ReShade (`dxgi.dll`) active and simply remove or disable the `renodx-re9requiem.addon64` file to eliminate the stutter while retaining other ReShade functionality.
 
 ---
 
