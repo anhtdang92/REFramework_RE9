@@ -1,234 +1,233 @@
+-- > RE9 Post Processing Control v2
+-- > Uses direct camera component manipulation via sdk.get_primary_camera()
+-- > Place in: reframework/autorun/
+
 local mod = {
     name = "RE9 Post Processing Control",
-    version = "1.0.0",
+    version = "2.0.0",
 }
 
+-- Default settings (false = effect disabled)
 local settings = {
-    filmGrain = true,
-    lensDistortion = true,
-    lensFlare = true,
-    bloom = true,
+    filmGrain = false,
+    fog = false,
     volumetricFog = true,
-    fog = true,
-    godRay = true,
+    godRay = false,
+    lensFlare = false,
+    motionBlur = false,
+    depthOfField = false,
     colorCorrect = true,
     TAA = true,
-    jitter = true,
     localExposure = true,
     customContrast = false,
     contrast = 1.0,
+    sharpness = 1.0,
 }
 
-local graphicsManager, cameraManager
-local graphicsSetting, displaySettings
-local tonemapping, tonemappingType
-local colorCorrectComponent
-local TAAStrength, localExposureType, lensDistortionSetting
 local initialized = false
 
-local function GenerateEnum(typename, double_ended)
-    local t = sdk.find_type_definition(typename)
-    if not t then return {} end
-
-    local fields = t:get_fields()
-    local enum = {}
-
-    for i, field in ipairs(fields) do
-        if field:is_static() then
-            local name = field:get_name()
-            local raw_value = field:get_data(nil)
-            enum[name] = raw_value
-            if double_ended then
-                enum[raw_value] = name
-            end
-        end
-    end
-
-    return enum
-end
-
-local function get_component(game_object, type_name)
-    local t = sdk.typeof(type_name)
-    if t == nil then return nil end
-    return game_object:call("getComponent(System.Type)", t)
-end
-
+-- Save/Load
 local function SaveSettings()
-    json.dump_file("re9_postprocessing.json", settings)
+    json.dump_file("re9_postprocessing_v2.json", settings)
 end
 
 local function LoadSettings()
-    local loaded = json.load_file("re9_postprocessing.json")
-    if loaded ~= nil then
+    local loaded = json.load_file("re9_postprocessing_v2.json")
+    if loaded then
         for key, val in pairs(loaded) do
             settings[key] = val
         end
     end
 end
 
+-- Helper to get component from GameObject
+local function get_component(game_object, type_name)
+    local t = sdk.typeof(type_name)
+    if t == nil then return nil end
+    return game_object:call("getComponent(System.Type)", t)
+end
+
+-- Generate enum lookup table
+local TAAStrength = nil
+local function get_taa_enum()
+    if TAAStrength then return TAAStrength end
+    local t = sdk.find_type_definition("via.render.ToneMapping.TemporalAA")
+    if not t then return nil end
+    TAAStrength = {}
+    for i, field in ipairs(t:get_fields()) do
+        if field:is_static() then
+            TAAStrength[field:get_name()] = field:get_data(nil)
+        end
+    end
+    return TAAStrength
+end
+
+-- Main apply function — called every frame
 local function ApplySettings()
-    -- Re-acquire managers every frame in case of scene changes
-    graphicsManager = sdk.get_managed_singleton("app.GraphicsManager")
-    if not graphicsManager then return end
-
-    cameraManager = sdk.get_managed_singleton("app.CameraManager")
-
-    -- Film grain: use app.RenderingManager (the only approach that works at runtime in RE9)
-    local renderingManager = sdk.get_managed_singleton("app.RenderingManager")
-    if renderingManager then
-        renderingManager:call("set__IsFilmGrainCustomFilterEnable", settings.filmGrain)
+    -- 1. Film Grain via RenderingManager (confirmed working)
+    local renderMgr = sdk.get_managed_singleton("app.RenderingManager")
+    if renderMgr then
+        renderMgr:call("set__IsFilmGrainCustomFilterEnable", settings.filmGrain)
     end
 
-    graphicsSetting = graphicsManager:call("get_NowGraphicsSetting")
+    -- 2. Camera components via sdk.get_primary_camera()
+    local camera = sdk.get_primary_camera()
+    if not camera then return end
 
-    if graphicsSetting then
-        graphicsSetting:call("set_FilmGrain_Enable", settings.filmGrain)
-        graphicsSetting:call("set_LensFlare_Enable", settings.lensFlare)
-        graphicsSetting:call("set_Fog_Enable", settings.fog)
-        graphicsSetting:call("set_VolumetricFogControl_Enable", settings.volumetricFog)
-        graphicsSetting:call("set_GodRay_Enable", settings.godRay)
+    local go = camera:call("get_GameObject")
+    if not go then return end
 
-        pcall(function()
-            if not lensDistortionSetting then
-                lensDistortionSetting = GenerateEnum("via.render.RenderConfig.LensDistortionSetting", true)
+    -- Fog
+    pcall(function()
+        local fog = get_component(go, "via.render.Fog")
+        if fog then fog:call("set_Enabled", settings.fog) end
+    end)
+
+    -- Volumetric Fog
+    pcall(function()
+        local vfog = get_component(go, "via.render.VolumetricFogControl")
+        if vfog then vfog:call("set_Enabled", settings.volumetricFog) end
+    end)
+
+    -- God Rays
+    pcall(function()
+        local godray = get_component(go, "via.render.GodRay")
+        if godray then godray:call("set_Enabled", settings.godRay) end
+    end)
+
+    -- Lens Flare
+    pcall(function()
+        local lf = get_component(go, "via.render.LensFlare")
+        if lf then lf:call("set_Enabled", settings.lensFlare) end
+    end)
+
+    -- Motion Blur
+    pcall(function()
+        local mb = get_component(go, "via.render.MotionBlur")
+        if mb then mb:call("set_Enabled", settings.motionBlur) end
+    end)
+
+    -- Depth of Field
+    pcall(function()
+        local dof = get_component(go, "via.render.DepthOfField")
+        if dof then dof:call("set_Enabled", settings.depthOfField) end
+    end)
+
+    -- ToneMapping (TAA, local exposure, contrast, sharpness)
+    pcall(function()
+        local tm = get_component(go, "via.render.ToneMapping")
+        if tm then
+            -- TAA
+            local taa = get_taa_enum()
+            if taa then
+                tm:call("setTemporalAA", settings.TAA and taa.Manual or taa.Disable)
             end
-            if lensDistortionSetting then
-                graphicsSetting:call("set_LensDistortionSetting",
-                    settings.lensDistortion and lensDistortionSetting.ON or lensDistortionSetting.OFF)
+
+            -- Local Exposure
+            tm:call("set_EnableLocalExposure", settings.localExposure)
+
+            -- Contrast
+            if settings.customContrast then
+                tm:call("set_Contrast", settings.contrast)
             end
-        end)
 
-        graphicsManager:call("setGraphicsSetting", graphicsSetting)
-    end
+            -- Sharpness
+            tm:call("set_Sharpness", settings.sharpness)
+        end
+    end)
 
-    -- Re-acquire camera components every frame
-    if cameraManager then
-        local camera = cameraManager:call("get_PrimaryCamera")
-        if camera then
-            local cameraGO = camera:call("get_GameObject")
-            if cameraGO then
-                tonemapping = get_component(cameraGO, "via.render.ToneMapping")
-
-                local ldrPost = get_component(cameraGO, "via.render.LDRPostProcess")
-                if ldrPost then
-                    colorCorrectComponent = ldrPost:call("get_ColorCorrect")
-                end
+    -- Color Correction (via LDRPostProcess sub-object)
+    pcall(function()
+        local ldr = get_component(go, "via.render.LDRPostProcess")
+        if ldr then
+            local cc = ldr:call("get_ColorCorrect")
+            if cc then
+                cc:call("set_Enabled", settings.colorCorrect)
             end
         end
-    end
-
-    if tonemapping then
-        if not TAAStrength then
-            TAAStrength = GenerateEnum("via.render.ToneMapping.TemporalAA", true)
-        end
-        if TAAStrength then
-            tonemapping:call("setTemporalAA",
-                settings.TAA and TAAStrength.Manual or TAAStrength.Disable)
-        end
-        tonemapping:call("set_EchoEnabled", settings.jitter)
-        tonemapping:call("set_EnableLocalExposure", settings.localExposure)
-
-        if settings.customContrast then
-            tonemapping:call("set_Contrast", settings.contrast)
-        end
-    end
-
-    if colorCorrectComponent then
-        colorCorrectComponent:call("set_Enabled", settings.colorCorrect)
-    end
+    end)
 
     if not initialized then
         initialized = true
-        log.info("[RE9 PostProcess] Initialized successfully")
+        log.info("[RE9 PostProcess v2] Initialized — using direct camera components")
     end
 end
 
+-- Load settings and start
 LoadSettings()
+
 re.on_frame(function()
-    ApplySettings()
+    pcall(ApplySettings)
 end)
+
 re.on_config_save(SaveSettings)
 
+-- UI
 re.on_draw_ui(function()
     if imgui.tree_node(mod.name .. " v" .. mod.version) then
         local changed = false
 
-        imgui.text("Film grain is OFF by default. Toggle options below.")
-        imgui.spacing()
-
-        -- Save/Load buttons
-        if imgui.button("Save Settings") then SaveSettings() end
+        -- Save/Load/Reset
+        if imgui.button("Save") then SaveSettings() end
         imgui.same_line()
         if imgui.button("Reset Defaults") then
             settings.filmGrain = false
-            settings.lensDistortion = false
-            settings.lensFlare = true
-            settings.bloom = true
+            settings.fog = false
             settings.volumetricFog = true
-            settings.fog = true
-            settings.godRay = true
+            settings.godRay = false
+            settings.lensFlare = false
+            settings.motionBlur = false
+            settings.depthOfField = false
             settings.colorCorrect = true
             settings.TAA = true
-            settings.jitter = true
             settings.localExposure = true
             settings.customContrast = false
             settings.contrast = 1.0
-            ApplySettings()
+            settings.sharpness = 1.0
+            SaveSettings()
         end
         imgui.spacing()
         imgui.separator()
 
-        imgui.text("Post Processing Effects")
+        -- Post-Processing Effects
+        imgui.text("Post-Processing Effects")
         imgui.spacing()
 
         changed, settings.filmGrain = imgui.checkbox("Film Grain", settings.filmGrain)
-        if changed then ApplySettings() end
-
-        changed, settings.lensDistortion = imgui.checkbox("Lens Distortion", settings.lensDistortion)
-        if changed then ApplySettings() end
-
-        changed, settings.lensFlare = imgui.checkbox("Lens Flare", settings.lensFlare)
-        if changed then ApplySettings() end
-
-        changed, settings.godRay = imgui.checkbox("God Rays", settings.godRay)
-        if changed then ApplySettings() end
-
         changed, settings.fog = imgui.checkbox("Fog", settings.fog)
-        if changed then ApplySettings() end
-
         changed, settings.volumetricFog = imgui.checkbox("Volumetric Fog", settings.volumetricFog)
-        if changed then ApplySettings() end
+        changed, settings.godRay = imgui.checkbox("God Rays", settings.godRay)
+        changed, settings.lensFlare = imgui.checkbox("Lens Flare", settings.lensFlare)
+        changed, settings.motionBlur = imgui.checkbox("Motion Blur", settings.motionBlur)
+        changed, settings.depthOfField = imgui.checkbox("Depth of Field", settings.depthOfField)
 
         imgui.spacing()
         imgui.separator()
         imgui.text("Anti-Aliasing & Color")
         imgui.spacing()
 
-        changed, settings.colorCorrect = imgui.checkbox("Color Correction", settings.colorCorrect)
-        if changed then ApplySettings() end
-
         changed, settings.TAA = imgui.checkbox("TAA", settings.TAA)
-        if changed then ApplySettings() end
-
-        changed, settings.jitter = imgui.checkbox("TAA Jitter", settings.jitter)
-        if changed then ApplySettings() end
-
+        changed, settings.colorCorrect = imgui.checkbox("Color Correction", settings.colorCorrect)
         changed, settings.localExposure = imgui.checkbox("Local Exposure", settings.localExposure)
-        if changed then ApplySettings() end
 
         imgui.spacing()
         imgui.separator()
-        imgui.text("Contrast")
+        imgui.text("Adjustments")
         imgui.spacing()
 
-        changed, settings.customContrast = imgui.checkbox("Custom Contrast", settings.customContrast)
-        if changed then ApplySettings() end
+        changed, settings.sharpness = imgui.drag_float("Sharpness", settings.sharpness, 0.01, 0.0, 5.0)
 
+        changed, settings.customContrast = imgui.checkbox("Custom Contrast", settings.customContrast)
         if settings.customContrast then
             changed, settings.contrast = imgui.drag_float("Contrast", settings.contrast, 0.01, 0.01, 5.0)
-            if changed then ApplySettings() end
         end
+
+        imgui.spacing()
+        imgui.separator()
+        imgui.text("Status: " .. (initialized and "Active" or "Waiting for camera..."))
 
         imgui.tree_pop()
     end
 end)
+
+log.info("[RE9 PostProcess v2] Loaded — direct camera component approach")
