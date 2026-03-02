@@ -9,7 +9,7 @@ using System.Threading;
 using REFrameworkNET;
 using REFrameworkNET.Attributes;
 
-class MHWildsWebAPI {
+class REFrameworkWebAPI {
     static HttpListener s_listener;
     static Thread s_thread;
     static CancellationTokenSource s_cts = new();
@@ -25,7 +25,7 @@ class MHWildsWebAPI {
     [PluginEntryPoint]
     public static void Main() {
         try {
-            var pluginDir = API.GetPluginDirectory(typeof(MHWildsWebAPI).Assembly);
+            var pluginDir = API.GetPluginDirectory(typeof(REFrameworkWebAPI).Assembly);
             s_webRoot = Path.Combine(pluginDir, "WebAPI");
 
             if (!Directory.Exists(s_webRoot)) {
@@ -82,11 +82,15 @@ class MHWildsWebAPI {
                 // POST endpoints
                 if (method == "POST") {
                     object postResult = path switch {
+#if MHWILDS
                         "/api/player/health" => SetPlayerHealth(ctx.Request),
                         "/api/player/position" => SetPlayerPosition(ctx.Request),
                         "/api/meshes" => SetMeshVisibility(ctx.Request),
                         "/api/materials" => SetMaterialVisibility(ctx.Request),
                         "/api/chat" => SendChat(ctx.Request),
+#elif RE9
+                        "/api/player/health" => SetPlayerHealthRE9(ctx.Request),
+#endif
                         "/api/explorer/field" => PostExplorerField(ctx.Request),
                         "/api/explorer/method" => PostExplorerMethod(ctx.Request),
                         "/api/explorer/batch" => PostExplorerBatch(ctx.Request),
@@ -121,7 +125,6 @@ class MHWildsWebAPI {
                 // GET endpoints
                 object result = path switch {
                     "/api" => GetIndex(),
-                    "/api/player" => GetPlayerInfo(),
                     "/api/camera" => GetCameraInfo(),
                     "/api/tdb" => GetTDBStats(),
                     "/api/singletons" => GetSingletonList(),
@@ -134,6 +137,9 @@ class MHWildsWebAPI {
                     "/api/explorer/search" => GetExplorerSearch(ctx.Request),
                     "/api/explorer/type" => GetExplorerType(ctx.Request),
                     "/api/explorer/singleton" => GetExplorerSingleton(ctx.Request),
+                    "/api/localize" => ResolveGuid(ctx.Request),
+#if MHWILDS
+                    "/api/player" => GetPlayerInfo(),
                     "/api/lobby" => GetLobbyMembers(),
                     "/api/weather" => GetWeather(),
                     "/api/equipment" => GetEquipment(),
@@ -144,8 +150,12 @@ class MHWildsWebAPI {
                     "/api/chat" => GetChatHistory(),
                     "/api/huntlog" => GetHuntLog(),
                     "/api/palico" => GetPalicoStats(),
-                    "/api/localize" => ResolveGuid(ctx.Request),
                     "/api/debug/byref" => DebugByRef(),
+#elif RE9
+                    "/api/player" => GetPlayerInfoRE9(),
+                    "/api/enemies" => GetEnemiesRE9(),
+                    "/api/gameinfo" => GetGameInfoRE9(),
+#endif
                     _ => null
                 };
 
@@ -213,13 +223,24 @@ class MHWildsWebAPI {
     }
 
     static object GetIndex() {
+        var endpoints = new List<string> {
+            "/api/camera", "/api/tdb", "/api/singletons", "/api/localize", "/api/help",
+            "/api/explorer/singletons", "/api/explorer/singleton",
+            "/api/explorer/object", "/api/explorer/summary", "/api/explorer/field", "/api/explorer/method",
+            "/api/explorer/array", "/api/explorer/search", "/api/explorer/type",
+            "/api/explorer/batch", "/api/explorer/chain"
+        };
+#if MHWILDS
+        endpoints.AddRange(new[] { "/api/player", "/api/lobby", "/api/weather", "/api/equipment",
+            "/api/inventory", "/api/meshes", "/api/materials", "/api/map", "/api/chat",
+            "/api/huntlog", "/api/palico" });
+#elif RE9
+        endpoints.AddRange(new[] { "/api/player", "/api/enemies", "/api/gameinfo" });
+#endif
         return new {
-            name = "MHWilds REFramework.NET Web API",
-            endpoints = new[] { "/api/player", "/api/camera", "/api/tdb", "/api/singletons", "/api/lobby", "/api/equipment", "/api/map", "/api/huntlog", "/api/palico",
-                "/api/explorer/singletons", "/api/explorer/singleton",
-                "/api/explorer/object", "/api/explorer/field", "/api/explorer/method",
-                "/api/explorer/array", "/api/explorer/search", "/api/explorer/type",
-                "/api/explorer/batch", "/api/explorer/chain" }
+            name = "REFramework.NET Web API",
+            game = System.Diagnostics.Process.GetCurrentProcess().ProcessName,
+            endpoints
         };
     }
 
@@ -227,6 +248,7 @@ class MHWildsWebAPI {
         try { return via.gui.message.get(guid)?.ToString(); } catch { return null; }
     }
 
+#if MHWILDS
     static object GetEquipment() {
         try {
             var pm = API.GetManagedSingletonT<app.PlayerManager>();
@@ -871,7 +893,7 @@ class MHWildsWebAPI {
             return new { error = e.Message };
         }
     }
-
+#endif
 
     static object ResolveGuid(HttpListenerRequest req) {
         try {
@@ -901,6 +923,7 @@ class MHWildsWebAPI {
         }
     }
 
+#if MHWILDS
     static object DebugByRef() {
         try {
             var tdef = REFrameworkNET.TDB.Get().FindType("ace.cFixedRingBuffer`1<app.ChatDef.MessageElement>");
@@ -1169,6 +1192,7 @@ class MHWildsWebAPI {
             return new { error = e.Message };
         }
     }
+#endif
 
     static object GetCameraInfo() {
         try {
@@ -1557,6 +1581,7 @@ class MHWildsWebAPI {
         return new { isObject = false, value = result.ToString() };
     }
 
+#if MHWILDS
     // ── Lobby endpoint ─────────────────────────────────────────────────
 
     static object GetLobbyMembers() {
@@ -1716,6 +1741,409 @@ class MHWildsWebAPI {
             return new { error = e.Message };
         }
     }
+#endif
+
+#if RE9
+    // ── RE9 Name Resolution ─────────────────────────────────────────────
+
+    static readonly Dictionary<string, string> s_characterNames = new() {
+        { "cp_A000", "Leon" },
+        { "cp_A100", "Grace" },
+    };
+
+    static readonly Dictionary<string, string> s_weaponNameCache = new();
+
+    static string ResolveCharacterName(string kindId) {
+        if (kindId == null) return null;
+        return s_characterNames.TryGetValue(kindId, out var name) ? name : kindId;
+    }
+
+    static string ResolveWeaponName(string weaponIdStr) {
+        if (weaponIdStr == null) return null;
+        if (s_weaponNameCache.TryGetValue(weaponIdStr, out var cached)) return cached;
+
+        try {
+            // Navigate: EquipmentManager._ItemWeaponIDDic._Dict._entries[]
+            // Each entry has .key (ItemID) and .value (ManagedItem with _Value = WeaponID)
+            // Find the entry where value matches our weaponIdStr, get the ItemID
+            // Then look up ItemDetailData from ItemManager._ItemCatalog, read _NameMessageId, localize
+
+            var equipMgr = API.GetManagedSingletonT<app.EquipmentManager>() as IObject;
+            var itemMgr = API.GetManagedSingletonT<app.ItemManager>() as IObject;
+            if (equipMgr == null || itemMgr == null) return weaponIdStr;
+
+            // Get ItemID for this WeaponID by iterating _ItemWeaponIDDic
+            var iwDicField = equipMgr.GetTypeDefinition().FindField("_ItemWeaponIDDic");
+            var iwDic = iwDicField?.GetDataBoxed(equipMgr.GetAddress(), false) as IObject;
+            if (iwDic == null) return weaponIdStr;
+
+            var dictField = iwDic.GetTypeDefinition().FindField("_Dict");
+            var dict = dictField?.GetDataBoxed(iwDic.GetAddress(), false) as IObject;
+            if (dict == null) return weaponIdStr;
+
+            var entriesField = dict.GetTypeDefinition().FindField("_entries");
+            var entries = entriesField?.GetDataBoxed(dict.GetAddress(), false) as IObject;
+            if (entries == null) return weaponIdStr;
+
+            var entryTd = entries.GetTypeDefinition();
+            int entryCount = entries.GetAddress() != 0 ? (int)entries.Call("get_Length") : 0;
+
+            IObject matchedItemId = null;
+            for (int i = 0; i < entryCount && matchedItemId == null; i++) {
+                try {
+                    var entry = entries.Call("Get", i) as IObject;
+                    if (entry == null) continue;
+
+                    var valueMgd = entry.GetTypeDefinition().FindField("value")?.GetDataBoxed(entry.GetAddress(), false) as IObject;
+                    if (valueMgd == null) continue;
+
+                    var weaponVal = valueMgd.GetTypeDefinition().FindField("_Value")?.GetDataBoxed(valueMgd.GetAddress(), false) as IObject;
+                    if (weaponVal == null) continue;
+
+                    if (weaponVal.Call("ToString").ToString() == weaponIdStr) {
+                        matchedItemId = entry.GetTypeDefinition().FindField("key")?.GetDataBoxed(entry.GetAddress(), false) as IObject;
+                    }
+                } catch { }
+            }
+
+            if (matchedItemId == null) return weaponIdStr;
+
+            // Now look up ItemDetailData from ItemManager._ItemCatalog
+            var catalogField = itemMgr.GetTypeDefinition().FindField("_ItemCatalog");
+            var catalog = catalogField?.GetDataBoxed(itemMgr.GetAddress(), false) as IObject;
+            if (catalog == null) return weaponIdStr;
+
+            var catDictField = catalog.GetTypeDefinition().FindField("_Dict");
+            var catDict = catDictField?.GetDataBoxed(catalog.GetAddress(), false) as IObject;
+            if (catDict == null) return weaponIdStr;
+
+            var catEntries = catDict.GetTypeDefinition().FindField("_entries")?.GetDataBoxed(catDict.GetAddress(), false) as IObject;
+            if (catEntries == null) return weaponIdStr;
+
+            int catCount = (int)catEntries.Call("get_Length");
+            string matchedItemStr = matchedItemId.Call("ToString").ToString();
+
+            for (int i = 0; i < catCount; i++) {
+                try {
+                    var entry = catEntries.Call("Get", i) as IObject;
+                    if (entry == null) continue;
+
+                    var key = entry.GetTypeDefinition().FindField("key")?.GetDataBoxed(entry.GetAddress(), false) as IObject;
+                    if (key == null || key.Call("ToString").ToString() != matchedItemStr) continue;
+
+                    var valueMgd = entry.GetTypeDefinition().FindField("value")?.GetDataBoxed(entry.GetAddress(), false) as IObject;
+                    if (valueMgd == null) continue;
+
+                    var detail = valueMgd.GetTypeDefinition().FindField("_Value")?.GetDataBoxed(valueMgd.GetAddress(), false) as IObject;
+                    if (detail == null) continue;
+
+                    // Read _NameMessageId (System.Guid, value type at offset 0x80)
+                    var nameGuidField = detail.GetTypeDefinition().FindField("_NameMessageId");
+                    if (nameGuidField == null) continue;
+
+                    var guidObj = nameGuidField.GetDataBoxed(detail.GetAddress(), false) as IObject;
+                    if (guidObj == null) continue;
+
+                    // Call via.gui.message.get(guid) to localize
+                    var msgTd = TDB.Get().FindType("via.gui.message");
+                    var getMethod = msgTd?.FindMethod("get(System.Guid)");
+                    if (getMethod == null) continue;
+
+                    var localizedStr = getMethod.Invoke(null, new object[] { guidObj });
+                    var result = localizedStr.ToString();
+                    if (!string.IsNullOrEmpty(result)) {
+                        s_weaponNameCache[weaponIdStr] = result;
+                        return result;
+                    }
+                } catch { }
+            }
+        } catch { }
+
+        return weaponIdStr;
+    }
+
+    // ── RE9 Player Info ──────────────────────────────────────────────────
+
+    static object GetPlayerInfoRE9() {
+        try {
+            var cm = API.GetManagedSingletonT<app.CharacterManager>();
+            if (cm == null) return new { error = "CharacterManager not available" };
+
+            var pc = cm.getPlayerContextRefFast();
+            if (pc == null) return new { error = "Player not available" };
+
+            bool isInSafeRoom = false, isGameOver = false;
+            try { isInSafeRoom = cm.IsPlayerInSafeRoom; } catch { }
+            try { isGameOver = cm.IsGameOvered; } catch { }
+
+            string characterId = null;
+            try { characterId = pc.KindID?.ToString(); } catch { }
+
+            float? posX = null, posY = null, posZ = null;
+            try {
+                var pos = pc.PositionFast;
+                posX = pos.x; posY = pos.y; posZ = pos.z;
+            } catch { }
+
+            int? health = null, maxHealth = null;
+            bool? isDead = null, invincible = null;
+            try {
+                var hp = pc.HitPoint;
+                if (hp != null) {
+                    health = hp.CurrentHitPoint;
+                    maxHealth = hp.CurrentMaximumHitPoint;
+                    isDead = hp.IsDead;
+                    invincible = hp.Invincible;
+                }
+            } catch { }
+
+            bool isSpawn = false;
+            try { isSpawn = pc.IsSpawn; } catch { }
+
+            return new {
+                characterId,
+                characterName = ResolveCharacterName(characterId),
+                health,
+                maxHealth,
+                isDead,
+                invincible,
+                isInSafeRoom,
+                isGameOver,
+                isSpawn,
+                position = new { x = posX, y = posY, z = posZ }
+            };
+        } catch (Exception e) {
+            return new { error = e.Message };
+        }
+    }
+
+    static object SetPlayerHealthRE9(HttpListenerRequest request) {
+        try {
+            using var reader = new StreamReader(request.InputStream, request.ContentEncoding);
+            var body = reader.ReadToEnd();
+            var doc = JsonDocument.Parse(body);
+            var value = doc.RootElement.GetProperty("value").GetInt32();
+
+            var cm = API.GetManagedSingletonT<app.CharacterManager>();
+            if (cm == null) return new { error = "CharacterManager not available" };
+
+            var pc = cm.getPlayerContextRefFast();
+            if (pc == null) return new { error = "Player not available" };
+
+            var hp = pc.HitPoint;
+            if (hp == null) return new { error = "HitPoint not available" };
+
+            hp.CurrentHitPoint = value;
+            return new { ok = true, health = value };
+        } catch (Exception e) {
+            return new { error = e.Message };
+        }
+    }
+
+    // ── RE9 Enemy List ───────────────────────────────────────────────────
+
+    static object GetEnemiesRE9() {
+        try {
+            var cm = API.GetManagedSingletonT<app.CharacterManager>();
+            if (cm == null) return new { error = "CharacterManager not available" };
+
+            var enemies = new List<object>();
+            var enemyList = cm.EnemyContextList;
+            if (enemyList != null) {
+                int count = enemyList.Count;
+                for (int i = 0; i < count; i++) {
+                    try {
+                        var ec = enemyList[i];
+                        if (ec == null) continue;
+
+                        bool isSpawn = false, isSuspended = false;
+                        try { isSpawn = ec.IsSpawn; } catch { }
+                        try { isSuspended = ec.IsSuspended; } catch { }
+                        if (!isSpawn || isSuspended) continue;
+
+                        string kindId = null;
+                        try { kindId = ec.KindID?.ToString(); } catch { }
+
+                        int? hp = null, maxHp = null;
+                        bool? isDead = null;
+                        try {
+                            var hitPoint = ec.HitPoint;
+                            if (hitPoint != null) {
+                                hp = hitPoint.CurrentHitPoint;
+                                maxHp = hitPoint.CurrentMaximumHitPoint;
+                                isDead = hitPoint.IsDead;
+                            }
+                        } catch { }
+
+                        bool isElite = false;
+                        try { isElite = ec.IsElite; } catch { }
+
+                        float? posX = null, posY = null, posZ = null;
+                        try {
+                            var tf = ec.Transform;
+                            if (tf != null) {
+                                var pos = tf.Position;
+                                posX = pos.x; posY = pos.y; posZ = pos.z;
+                            }
+                        } catch { }
+
+                        enemies.Add(new {
+                            kindId,
+                            health = hp,
+                            maxHealth = maxHp,
+                            isDead,
+                            isElite,
+                            position = new { x = posX, y = posY, z = posZ }
+                        });
+                    } catch { }
+                }
+            }
+
+            return new {
+                count = enemies.Count,
+                isPlayerInSafeRoom = cm.IsPlayerInSafeRoom,
+                enemies
+            };
+        } catch (Exception e) {
+            return new { error = e.Message };
+        }
+    }
+
+    // ── RE9 Game Info ────────────────────────────────────────────────────
+
+    static object GetGameInfoRE9() {
+        try {
+            var result = new Dictionary<string, object>();
+
+            // Chapter / Story progress
+            try {
+                var lfm = API.GetManagedSingletonT<app.LevelFlowManager>();
+                if (lfm != null) {
+                    result["chapter"] = lfm.getDyingProgressName();
+                    result["progressNo"] = lfm.getDyingProgressNo();
+                }
+            } catch { }
+
+            // Scenario time
+            try {
+                var stm = API.GetManagedSingletonT<app.ScenarioTimeManager>();
+                if (stm != null) {
+                    result["scenarioTime"] = stm.CurrentKind?.ToString();
+                }
+            } catch { }
+
+            // Difficulty
+            try {
+                var gdm = API.GetManagedSingletonT<app.GameDifficultyManager>();
+                if (gdm != null) {
+                    result["difficulty"] = gdm.DifficultyID?.ToString();
+                }
+            } catch { }
+
+            // Adaptive rank
+            try {
+                var rm = API.GetManagedSingletonT<app.RankManager>();
+                if (rm != null) {
+                    result["rank"] = rm.getCurrentRank();
+                    result["rankMax"] = 10;
+                    result["enemyDamageFactor"] = rm.getEnemyDamageFactor();
+                    result["playerDamageFactor"] = rm.getPlayerDamageFactor();
+                    result["enemyMoveFactor"] = rm.getEnemyMoveFactor();
+                    result["enemyWinceFactor"] = rm.getEnemyWinceFactor();
+                }
+            } catch { }
+
+            // Play time from GameClock (OperationTimerType enum not in proxy, use reflection)
+            try {
+                var gc = API.GetManagedSingletonT<app.GameClock>();
+                if (gc != null) {
+                    var gcObj = gc as IObject;
+                    var timerTd = TDB.Get().FindType("app.OperationTimerType");
+                    if (timerTd != null) {
+                        var enumVal = _System.Enum.InternalBoxEnum(timerTd.GetRuntimeType().As<_System.RuntimeType>(), 2); // GameElapsedTime = 2
+                        var gameTime = gcObj.Call("getElapsedTime", enumVal);
+                        if (gameTime != null) {
+                            var us = Convert.ToInt64(gameTime.ToString());
+                            result["playTimeMicroseconds"] = us;
+                            result["playTimeSeconds"] = (double)us / 1_000_000.0;
+                        }
+                    }
+                }
+            } catch { }
+
+            // Game data (clear count, NG count)
+            try {
+                var gdm2 = API.GetManagedSingletonT<app.GameDataManager>();
+                if (gdm2 != null) {
+                    result["newGameStarts"] = gdm2.NewGameCount;
+                    result["totalClears"] = gdm2.TotalClearCount;
+                }
+            } catch { }
+
+            // Collectibles from GimmickManager (use reflection for max methods not in proxy)
+            try {
+                var gm = API.GetManagedSingletonT<app.GimmickManager>();
+                if (gm != null) {
+                    var gmObj = gm as IObject;
+                    int? safeCount = null, safeMax = null;
+                    int? containerCount = null, containerMax = null;
+                    int? fragileCount = null, fragileMax = null;
+                    try { safeCount = (int)gm.getAchievementSafeObjectCount(); } catch { }
+                    try { safeMax = Convert.ToInt32(gmObj.Call("getAchievementSafeObjectMaxCount").ToString()); } catch { }
+                    try { containerCount = (int)gm.getAchievementContainerObjectCount(); } catch { }
+                    try { containerMax = Convert.ToInt32(gmObj.Call("getAchievementContainerObjectMaxCount").ToString()); } catch { }
+                    try { fragileCount = (int)gm.getAchievementFragileSymbolCount(); } catch { }
+                    try { fragileMax = Convert.ToInt32(gmObj.Call("getAchievementFragileSymbolMaxCount").ToString()); } catch { }
+                    result["collectibles"] = new {
+                        safes = new { found = safeCount, max = safeMax },
+                        containers = new { found = containerCount, max = containerMax },
+                        fragileSymbols = new { found = fragileCount, max = fragileMax }
+                    };
+                }
+            } catch { }
+
+            // Combat state from PlayerContextUnit_Common
+            try {
+                var cm = API.GetManagedSingletonT<app.CharacterManager>();
+                var pc = cm?.getPlayerContextRefFast();
+                if (pc != null) {
+                    var common = pc.Common;
+                    if (common != null) {
+                        var weaponIdStr = common.EquipWeaponID?.ToString();
+                        result["weapon"] = weaponIdStr;
+                        result["weaponName"] = ResolveWeaponName(weaponIdStr);
+                        try {
+                            var commonObj = common as IObject;
+                            var fearField = commonObj?.GetTypeDefinition()?.FindField("_FearLevelRate");
+                            if (fearField != null) result["fearLevel"] = fearField.GetDataBoxed(commonObj.GetAddress(), false);
+                        } catch { }
+                        result["combat"] = new {
+                            isHolding = common.IsHolding,
+                            isShooting = common.IsShooting,
+                            isReloading = common.IsReloading,
+                            isMeleeAttack = common.IsMeleeAttack,
+                            isCrouch = common.IsCrouch,
+                            isRun = common.IsRun,
+                            isIdle = common.IsIdle
+                        };
+                    }
+                }
+            } catch { }
+
+            // Scene info from MainGameFlowManager
+            try {
+                var mgfm = API.GetManagedSingletonT<app.MainGameFlowManager>();
+                if (mgfm != null) {
+                    result["isMainGame"] = mgfm.IsMainGame();
+                }
+            } catch { }
+
+            return result;
+        } catch (Exception e) {
+            return new { error = e.Message };
+        }
+    }
+#endif
 
     // ── Chain endpoint ───────────────────────────────────────────────────
 

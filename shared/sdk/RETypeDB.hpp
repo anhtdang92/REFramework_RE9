@@ -120,12 +120,11 @@ struct TDB {
     uint32_t numAttributes;                     
     int32_t numInitData;                        
     uint32_t numAttributes2;                    
-    uint32_t numInternStrings;                  
-    uint32_t numModules;                        
-    int32_t devEntry;                           
-    int32_t appEntry;     
-    
+    uint32_t numInternStrings;
     uint32_t unkNum; // added in TDB 82 (mhstories 3)
+    uint32_t numModules;                  
+    int32_t devEntry;                   
+    int32_t appEntry;
     
     uint32_t numStringPool;                     
     uint32_t numBytePool;                       
@@ -299,12 +298,13 @@ struct TDB {
     uint32_t numAttributes;                     
     int32_t numInitData;                        
     uint32_t numAttributes2;                    
-    uint32_t numInternStrings;                  
+    uint32_t numInternStrings;   
+
+    uint32_t unkNum; // added in TDB 82 (mhstories 3)
+
     uint32_t numModules;                        
     int32_t devEntry;                           
     int32_t appEntry;     
-    
-    uint32_t unkNum; // added in TDB 82 (mhstories 3)
     
     uint32_t numStringPool;                     
     uint32_t numBytePool;                       
@@ -477,12 +477,11 @@ struct TDB {
     uint32_t numAttributes;                     
     int32_t numInitData;                        
     uint32_t numAttributes2;                    
-    uint32_t numInternStrings;                  
+    uint32_t numInternStrings; 
+    uint32_t unkNum; // added in TDB 82 (mhstories 3)                 
     uint32_t numModules;                        
     int32_t devEntry;                           
     int32_t appEntry;     
-    
-    uint32_t unkNum; // added in TDB 82 (mhstories 3)
 
     uint32_t numStringPool;                     
     uint32_t numBytePool;     
