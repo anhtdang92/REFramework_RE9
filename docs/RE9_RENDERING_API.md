@@ -1,201 +1,240 @@
 # RE9 Rendering API Reference
 
 > Research notes for creating REFramework Lua mods for Resident Evil 9 (Requiem).
-> Generated from runtime API exploration using `re9_api_explorer.lua`.
+> Generated from runtime API exploration using `re9_api_explorer.lua` v3.
 
 ---
 
-## Key Discovery: `app.GraphicsManager` Does NOT Exist in RE9
+## Critical Discovery: `app.GraphicsManager` Does NOT Exist
 
-The MH Wilds post-processing script pattern (`graphicsSetting:call("set_FilmGrain_Enable", ...)` → `graphicsManager:call("setGraphicsSetting", ...)`) **does not work in RE9** because `app.GraphicsManager` doesn't exist. Effects must be controlled through other singletons and camera components.
+The MH Wilds `setGraphicsSetting` pattern **does not work in RE9**. Effects must be controlled through `app.RenderingManager` and direct camera component manipulation via `sdk.get_primary_camera()`.
 
 ---
 
-## Working Runtime APIs
+## Enum Reference
 
-### `app.RenderingManager` (Singleton)
+### `app.LayeredParamGroupBits` (Post-Effect Groups)
+| Value | Name |
+|-------|------|
+| 0 | None |
+| 1 | Group_00 |
+| 2 | Group_01 |
+| 4 | Group_02 |
+| 8 | Group_03 |
+| 16 | Group_04 |
+| 32 | Group_05 |
+| 64 | Group_06 |
+| 128 | Group_07 |
 
-The primary rendering singleton. Film grain is controlled here.
+### `app.CustomFilterController.CustomFilterType`
+| Value | Name |
+|-------|------|
+| 0 | None |
+| 1 | **FilmGrain** |
+| 2 | Scope |
+| 3 | SurveillanceCamera |
+| 4 | GlitchNoise |
+
+### `via.render.ToneMapping.TemporalAA`
+| Value | Name |
+|-------|------|
+| 0 | Legacy |
+| 1 | Manual |
+| 2 | Weak |
+| 3 | Mild |
+| 4 | Strong |
+| 5 | **Disable** |
+
+### `via.render.RenderConfig.LensDistortionSetting`
+| Value | Name |
+|-------|------|
+| 0 | ON |
+| 1 | DistortionOnly |
+| 2 | **OFF** |
+
+### `via.render.ToneMapping.LocalExposureType`
+| Value | Name |
+|-------|------|
+| 0 | Legacy |
+| 1 | BlurredLuminance |
+| 2 | LocalLaplacian |
+
+---
+
+## Camera Components (via `sdk.get_primary_camera()`)
+
+`sdk.get_primary_camera()` works in RE9. Access components via:
+```lua
+local camera = sdk.get_primary_camera()
+local go = camera:call("get_GameObject")
+local comp = go:call("getComponent(System.Type)", sdk.typeof("via.render.Foo"))
+```
+
+### Found Components
+
+| Component | Enabled | Methods | Runtime Toggle |
+|-----------|---------|---------|----------------|
+| `via.render.ToneMapping` | ✅ true | 193 | `set_Enabled(bool)`, `setTemporalAA()`, `set_Contrast()`, `set_EnableLocalExposure()`, `set_EchoEnabled()`, `set_Sharpness()` |
+| `via.render.LDRPostProcess` | ✅ true | 18 | `set_Enabled(bool)` — contains sub-objects: `get_ColorCorrect`, `get_FilmGrain`, `get_LensDistortion`, `get_HazeFilter`, `get_RadialBlur`, `get_ImagePlane` |
+| `via.render.Fog` | ❌ false | 90 | `set_Enabled(bool)`, `set_Density()`, `set_Intensity()`, `set_MaxOpacity()`, `set_StartDistance()` |
+| `via.render.VolumetricFogControl` | ✅ true | 102 | `set_Enabled(bool)`, `set_ShadowEnabled()`, `set_EmissionEnabled()` |
+| `via.render.GodRay` | ❌ false | 46 | `set_Enabled(bool)`, `set_Density()`, `set_Exposure()`, `set_Weight()`, `set_SunIntensity()` |
+| `via.render.LensFlare` | ❌ false | 36 | `set_Enabled(bool)`, `set_Bloom()`, `set_BloomThreshold()`, `set_Dispersion()` |
+| `via.render.MotionBlur` | ❌ false | 10 | `set_Enabled(bool)`, `set_ShutterAngle()` |
+| `via.render.DepthOfField` | ❌ false | 97 | `set_Enabled(bool)`, `set_FocusDistance()`, `set_FNumber()` |
+| `via.render.CustomFilter` | ❌ false | 15 | `set_Enabled(bool)` |
+
+### Not Found on Camera
+```
+via.render.ExponentialHeightFog, via.render.VolumetricFog,
+via.render.LensDistortion, via.render.Bloom, via.render.FilmGrain,
+via.render.FilmicGrain, via.render.ScreenSpaceReflection, via.render.Vignette,
+via.render.ChromaticAberration, via.render.AmbientOcclusion, via.render.ColorCorrect,
+via.render.SpaceWarp, via.render.IBL, via.render.RenderConfig,
+via.render.HDRPostProcess, via.render.SSAO, via.render.SSR
+```
+
+---
+
+## `app.RenderingManager` (Singleton) — 77 methods
 
 ```lua
 local mgr = sdk.get_managed_singleton("app.RenderingManager")
 ```
 
-#### Confirmed Working
-
+### Confirmed Working
 | Method | Effect |
 |--------|--------|
-| `set__IsFilmGrainCustomFilterEnable(bool)` | ✅ Toggles film grain in real-time |
-| `get__IsFilmGrainCustomFilterEnable()` | Returns current film grain state |
+| `set__IsFilmGrainCustomFilterEnable(bool)` | ✅ Toggles film grain real-time |
 
-#### Potentially Useful Methods (Untested)
-
-| Method | Likely Purpose |
-|--------|---------------|
-| `activateFilmGrainCustomFilter` | Activate film grain filter |
-| `get_PostEffectGroupBitsControl` | Returns bitfield controller for post-effect groups |
-| `get_CustomFilterController` / `set_CustomFilterController` | Custom visual filter system |
-| `updateVolumetricFog` | Volumetric fog update — may accept params |
-| `updateLDRProcess` | LDR post-processing (color correction) |
-| `updateToneMapping` | Tone mapping updates |
-| `updateVisualFilter` | Visual filter control |
-| `setDirectionalLight` | Directional light (god rays depend on this) |
-| `requestVolumetricParticle` | Volumetric particles |
-| `setCameraFOV` | Camera field of view |
-| `setWindPower` | Wind power (hair/cloth physics) |
-| `setDefaultShadowLodBias` / `clearDefaultShadowLodBias` | Shadow LOD control |
-| `updateFrameGenerationSkip` | Frame generation (DLSS FG) |
-| `updateReflexLowLatencyMode` | NVIDIA Reflex |
-
-<details>
-<summary>Full method list (77 methods)</summary>
-
-```
-.cctor, .ctor, activateFilmGrainCustomFilter, add_OnCutEvent,
-add_OnSetupOnSystemReady, applyDisableOutputID, applySSSSSControlParam,
-clearDefaultShadowLodBias, clearFromCamera, clearUserGlobalParam, eventCut,
-getHairColorModifyRate, getScopeViewController, get_CustomFilterController,
-get_IsRenderOutputCutScene, get_IsSetuppedFromCamera,
-get_PostEffectGroupBitsControl, get_ShaderWarmingProgressRate,
-get_ToneMappingQueryRealEV, get__IsFilmGrainCustomFilterEnable, lateUpdate,
-onDestroy, onEventCut, onEventEnd, onEventEndWithCut, onEventEndWithSeamless,
-onEventStart, onEventStartWithCut, onEventStartWithSeamless,
-onOptionValueChanged, onStartEventCameraCut, registerCatalog,
-registerDisableOutputID, registerScopeCameraController,
-registerScopeViewController, remove_OnCutEvent, remove_OnSetupOnSystemReady,
-requestCut, requestHairColorModifyRate, requestShaderWarming,
-requestStrandsDepthThreshold, requestVolumetricParticle, reset, setCameraFOV,
-setDefaultShadowLodBias, setDirectionalLight, setHairColorModifyRate,
-setPlayerPosition, setShaderTimer, setUIShaderTimer, setWindPower,
-set_CustomFilterController, set_IsRenderOutputCutScene,
-set_ToneMappingQueryRealEV, set__IsFilmGrainCustomFilterEnable,
-setupFromCamera, setupOnSystemReady, start, startIngame, unregisterCatalog,
-unregisterDisableOutputID, unregisterScopeCameraController,
-unregisterScopeViewController, updateCut, updateFrameGenerationSkip,
-updateHairColorDodifyRAte, updateLDRProcess, updateReflexLowLatencyMode,
-updateRenderOutputCutScene, updateShaderWarming, updateStrandsDepthThreshold,
-updateToneMapping, updateVisualFilter, updateVolumetricFog
-```
-
-</details>
+### Key Methods to Explore
+| Method | Purpose |
+|--------|---------|
+| `get_PostEffectGroupBitsControl` | Returns `app.ContextualPostEffectGroupBitsController` |
+| `get_CustomFilterController` | Returns `app.CustomFilterController` |
+| `updateVolumetricFog` | Volumetric fog pipeline |
+| `updateLDRProcess` | LDR post-processing |
+| `updateToneMapping` | Tone mapping |
+| `updateVisualFilter` | Visual filters |
 
 ---
 
-### `PostEffectGroupBitsControl` (via RenderingManager)
+## `PostEffectGroupBitsControl`
 
 Type: `app.ContextualPostEffectGroupBitsController`
 
-Accessed via: `renderingMgr:call("get_PostEffectGroupBitsControl")`
+| Method | Params | Returns |
+|--------|--------|---------|
+| `requestSetGroupEnabled` | **2 params** | `void` |
+| `setApply` | | |
+| `onApply` | | |
+| `reset` | | |
 
-> **High-priority lead.** The `requestSetGroupEnabled` method likely provides master toggles for post-effect groups (fog, god rays, etc.) using a bitfield.
+Fields: `_TargetBits = 0` (LayeredParamGroupBits), `_Apply = false`
 
-| Method | Purpose |
-|--------|---------|
-| `requestSetGroupEnabled` | ⭐ Toggle effect groups on/off |
-| `setApply` | Apply pending changes |
-| `onApply` | Apply callback |
-| `optionValueFixed` | Lock option value |
-| `reset` | Reset to defaults |
-
-**Fields:**
-| Type | Name | Observed Value |
-|------|------|---------------|
-| `app.LayeredParamGroupBits` | `_TargetBits` | `0` |
-| `System.Boolean` | `_Apply` | `false` |
-
-**Next steps:** Enumerate `app.LayeredParamGroupBits` to discover which bit corresponds to which effect group, then call `requestSetGroupEnabled` with specific group IDs.
+> **Next step:** Call `requestSetGroupEnabled(group_bit, bool)` with each Group_00–Group_07 value to find which group controls which effect.
 
 ---
 
-### `CustomFilterController` (via RenderingManager)
+## `CustomFilterController`
 
 Type: `app.CustomFilterController`
 
-Accessed via: `renderingMgr:call("get_CustomFilterController")`
+### Filter Types Available
+- `0 = None`, `1 = FilmGrain`, `2 = Scope`, `3 = SurveillanceCamera`, `4 = GlitchNoise`
 
-Controls visual filters (film grain is one). Has a priority system for stacking filters.
-
+### Key Methods
 | Method | Purpose |
 |--------|---------|
-| `registerCustomFilter` | Register a new filter |
-| `requestActivate` | Activate a filter |
-| `requestDeactivate` | Deactivate a filter |
-| `changeCustomFilter` | Change active filter |
-| `clearCustomFilter` | Clear filter |
-| `getCurrentTopPriorityType` | Get highest-priority active filter |
-| `setSwitchType` | Set filter switch behavior |
-| `setEventControlEnable` / `isEventControlEnable` | Event-driven filter control |
+| `requestActivate(type)` | Activate a filter type |
+| `requestDeactivate(type)` | Deactivate a filter type |
+| `clearCustomFilter` | Clear all filters |
+| `getCurrentTopPriorityType` | Get active filter |
 
-**Fields:**
-| Type | Name | Observed Value |
-|------|------|---------------|
-| `CustomFilterType` | `_CurrentType` | `0` |
-| `via.render.CustomFilter` | `_CustomFilter` | Object pointer |
-| `Dictionary<CustomFilterType, CustomFilterTypeBase>` | `_CustomFilterDict` | Object pointer |
-
-**Next steps:** Enumerate `app.CustomFilterController.CustomFilterType` to discover available filter types, then use `requestDeactivate` to disable specific filters.
+Fields: `_CurrentType = 0` (None), `_CustomFilter` → `via.render.CustomFilter` object
 
 ---
 
-## Camera Components — Not Yet Explored
+## `LDRPostProcess` Sub-Objects
 
-> **Problem:** `app.CameraManager` returns `nil` in RE9. The camera manager class likely has a different name.
+`via.render.LDRPostProcess` has getter/setter methods for sub-components:
+- `get_ColorCorrect` / `set_ColorCorrect` — Color correction
+- **`get_FilmGrain`** / `set_FilmGrain` — Film grain (alternative path!)
+- `get_LensDistortion` / `set_LensDistortion` — Lens distortion
+- `get_HazeFilter` / `set_HazeFilter` — Haze filter
+- `get_RadialBlur` / `set_RadialBlur` — Radial blur
+- `get_ImagePlane` / `set_ImagePlane` — Image plane
+- `get_ColorDeficiencySimulation` / `set_ColorDeficiencySimulation` — Color deficiency sim
 
-### Known Working Camera Component APIs (from MH Wilds reference)
+---
 
-These work in other RE Engine games via `getComponent` on the camera's GameObject:
+## Other Singletons Found
 
-| Component | Methods | Controls |
-|-----------|---------|----------|
-| `via.render.ToneMapping` | `setTemporalAA`, `set_EchoEnabled`, `set_EnableLocalExposure`, `set_Contrast` | TAA, jitter, local exposure, contrast |
-| `via.render.LDRPostProcess` → `get_ColorCorrect` | `set_Enabled` | Color correction |
+| Singleton | Methods | Notes |
+|-----------|---------|-------|
+| `app.OptionManager` | 0 | Empty — wrapper only |
+| `app.LightManager` | 120 | Controls lights, assist lights, day/night, god rays indirectly |
 
-### Components to Search For (once camera is found)
-
+### Not Found
 ```
-via.render.ToneMapping, via.render.LDRPostProcess, via.render.Fog,
-via.render.ExponentialHeightFog, via.render.VolumetricFog,
-via.render.VolumetricFogControl, via.render.GodRay, via.render.LensFlare,
-via.render.LensDistortion, via.render.Bloom, via.render.FilmGrain,
-via.render.ScreenSpaceReflection, via.render.MotionBlur, via.render.DepthOfField,
-via.render.Vignette, via.render.ChromaticAberration, via.render.AmbientOcclusion,
-via.render.ColorCorrect, via.render.FilmicGrain, via.render.SpaceWarp,
-via.render.IBL, via.render.RenderConfig
+app.GraphicsManager, app.GraphicsSetting, app.DisplayManager,
+app.ScreenManager, app.PostEffectManager, app.EnvironmentManager,
+app.WeatherManager, app.SceneManager
 ```
 
 ---
 
-## Research Priorities
+## Recommended Mod Strategy
 
-1. **Find the RE9 camera manager** — Try `sdk.get_primary_camera()` directly instead of going through `app.CameraManager`
-2. **Enumerate `app.LayeredParamGroupBits`** — Discover the bit values for each effect group
-3. **Enumerate `app.CustomFilterController.CustomFilterType`** — Discover available filter types
-4. **Test `requestSetGroupEnabled`** — Try toggling effect groups via the bitfield controller
-5. **Test `requestDeactivate`** on CustomFilterController — Try disabling specific custom filters
+### For each effect, use the DIRECT camera component approach:
+
+```lua
+local camera = sdk.get_primary_camera()
+local go = camera:call("get_GameObject")
+
+-- Disable Fog
+local fog = go:call("getComponent(System.Type)", sdk.typeof("via.render.Fog"))
+if fog then fog:call("set_Enabled", false) end
+
+-- Disable God Rays
+local godray = go:call("getComponent(System.Type)", sdk.typeof("via.render.GodRay"))
+if godray then godray:call("set_Enabled", false) end
+
+-- Disable Lens Flare
+local lensflare = go:call("getComponent(System.Type)", sdk.typeof("via.render.LensFlare"))
+if lensflare then lensflare:call("set_Enabled", false) end
+
+-- Disable Motion Blur
+local mb = go:call("getComponent(System.Type)", sdk.typeof("via.render.MotionBlur"))
+if mb then mb:call("set_Enabled", false) end
+
+-- Disable Depth of Field
+local dof = go:call("getComponent(System.Type)", sdk.typeof("via.render.DepthOfField"))
+if dof then dof:call("set_Enabled", false) end
+
+-- Film Grain (via RenderingManager — confirmed working)
+local renderMgr = sdk.get_managed_singleton("app.RenderingManager")
+if renderMgr then renderMgr:call("set__IsFilmGrainCustomFilterEnable", false) end
+
+-- TAA (via ToneMapping component)
+local tm = go:call("getComponent(System.Type)", sdk.typeof("via.render.ToneMapping"))
+if tm then tm:call("setTemporalAA", 5) end -- 5 = Disable
+
+-- Color Correction (via LDRPostProcess sub-object)
+local ldr = go:call("getComponent(System.Type)", sdk.typeof("via.render.LDRPostProcess"))
+if ldr then
+    local cc = ldr:call("get_ColorCorrect")
+    if cc then cc:call("set_Enabled", false) end
+end
+```
+
+### Apply every frame via `re.on_frame()` to prevent game from overriding.
 
 ---
 
-## RE Engine Rendering Architecture (General)
+## Research Priorities (Remaining)
 
-```
-┌─────────────────────────────────┐
-│ Settings Pipeline (startup only)│
-│ GraphicsManager → setGraphics   │  ❌ Does not work at runtime
-│ Setting → set_FilmGrain_Enable  │     (RE9: class doesn't even exist)
-└─────────────────────────────────┘
-
-┌─────────────────────────────────┐
-│ Runtime Rendering (per-frame)   │
-│ RenderingManager → direct props │  ✅ Works (film grain)
-│ Camera components → set_Enabled │  ✅ Works (TAA, color correction)
-│ PostEffectGroupBits → bitfield  │  ⭐ Untested — likely master switch
-└─────────────────────────────────┘
-```
-
-## Reference Scripts
-
-| Script | Status | What It Does |
-|--------|--------|-------------|
-| `disable_film_grain.lua` | ✅ Deployed | Kills film grain every frame via RenderingManager |
-| `re9_disable_postprocessing.lua` | ⚠️ Experimental | Tries GraphicsManager (doesn't work in RE9) |
-| `re9_api_explorer.lua` | 🔧 Debug tool | Dumps API methods to `re9_rendering_api_dump.txt` |
+1. **Test `set_Enabled(false)` on camera components** — Fog, GodRay, LensFlare all show `Enabled = false` already, need to test toggling ON then OFF
+2. **Test `requestSetGroupEnabled(group_bit, enabled)`** — Try each Group_00–07 to discover what they control
+3. **Explore `LDRPostProcess.get_FilmGrain()`** — Alternative film grain path through camera component
+4. **Test `requestDeactivate(1)`** on CustomFilterController — Deactivate FilmGrain filter type
