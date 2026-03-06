@@ -210,3 +210,15 @@ System::String^ REFrameworkNET::API::GetPluginDirectory(System::Reflection::Asse
 
     return nullptr;
 }
+
+REFrameworkNET::ResourceManager^ REFrameworkNET::API::GetResourceManager() {
+    if (s_api == nullptr) {
+        throw gcnew APINotInitializedException();
+    }
+
+    auto mgr = s_api->resource_manager();
+    if (mgr == nullptr) {
+        return nullptr;
+    }
+    return gcnew REFrameworkNET::ResourceManager((REFrameworkResourceManagerHandle)mgr);
+}
