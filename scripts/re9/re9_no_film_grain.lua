@@ -1,20 +1,27 @@
--- RE9 Minimal No Film Grain
--- Only uses the confirmed RenderingManager API to avoid side effects
+-- RE9 Minimal No Film Grain (Optimized)
+-- Created: 2026-03-02
+-- Only uses the confirmed RenderingManager API
 
 local mod = {
     name = "RE9 No Film Grain",
-    version = "1.0.0",
+    version = "1.0.1",
 }
 
 local settings = {
     no_film_grain = true
 }
 
+-- Cache the singleton for performance (prevents lookup every frame)
+local rendering_manager = nil
+
 local function ApplySettings()
-    local ren = sdk.get_managed_singleton("app.RenderingManager")
-    if ren and ren.call then
-        -- This is the specific method we confirmed works without affecting lighting much
-        ren:call("set__IsFilmGrainCustomFilterEnable", not settings.no_film_grain)
+    -- Only look up once or if lost
+    if not rendering_manager then
+        rendering_manager = sdk.get_managed_singleton("app.RenderingManager")
+    end
+
+    if rendering_manager and rendering_manager.call then
+        rendering_manager:call("set__IsFilmGrainCustomFilterEnable", not settings.no_film_grain)
     end
 end
 
